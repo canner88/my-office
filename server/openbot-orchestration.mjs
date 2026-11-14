@@ -53,6 +53,9 @@ function assignmentFor(agent, prompt, index, category, model = {}, { stage = nul
     workStation: category.station,
     provider: model.provider || '',
     model: model.model || '',
+    fallbackProvider: model.fallbackProvider || '',
+    fallbackModel: model.fallbackModel || '',
+    fallbackUsed: false,
     brief: `“${prompt}” görevi için ${role.toLocaleLowerCase('tr-TR')} katkısı`,
     status: staged ? 'queued' : 'working',
     result: '',
@@ -243,6 +246,7 @@ export function createOpenBotOrchestrator({ dataDir, readAgents, startTask = nul
           text: `${item.callbackMarker} [Oto-İyileştirme / Watchdog Devri] ${item.brief}. Önceki ajan arızalandı (${reason}). Ana görev: ${task.prompt}. Director senden rapor istiyor.`,
           orchestrationId: task.id,
           assignmentId: item.id,
+          dispatchAttempt: item.dispatchAttempt,
           reportRequired: true,
           provider: item.provider,
           model: item.model
@@ -265,6 +269,47 @@ export function createOpenBotOrchestrator({ dataDir, readAgents, startTask = nul
     }
   }
 
+  async function retryWithFallback(task, item, reason) {
+    if (!startTask || !item.fallbackModel || item.fallbackUsed || item.fallbackModel === item.model) return false;
+    item.fallbackUsed = true;
+    item.provider = item.fallbackProvider || item.provider;
+    item.model = item.fallbackModel;
+    item.status = 'working';
+    item.result = '';
+    item.dispatch = 'retrying-fallback';
+    item.dispatchAttempt = Number(item.dispatchAttempt || 0) + 1;
+    item.callbackMarker = `[MY_OFFICE_TASK:${task.id}:${item.id}:${item.dispatchAttempt}]`;
+    item.reportRequestedAt = now();
+    decision(task, 'model-fallback', {
+      assignmentId: item.id,
+      agentId: item.agentId,
+      provider: item.provider,
+      model: item.model,
+      attempt: item.dispatchAttempt,
+      reason: clampText(reason, 200)
+    });
+    try {
+      const result = await startTask({
+        agentId: item.agentId,
+        text: `${item.callbackMarker} [Yedek model denemesi] ${item.brief}. Önceki model başarısız oldu (${reason}). Ana görev: ${task.prompt}. Director senden kısa bir rapor istiyor.`,
+        orchestrationId: task.id,
+        assignmentId: item.id,
+        dispatchAttempt: item.dispatchAttempt,
+        reportRequired: true,
+        provider: item.provider,
+        model: item.model
+      });
+      if (!result?.ok) throw new Error(result?.error || 'Yedek model görevi gönderilemedi');
+      item.externalTaskId = result.taskId || null;
+      item.dispatch = 'sent';
+      return true;
+    } catch (err) {
+      item.dispatch = 'failed';
+      item.fallbackFailure = clampText(err.message || err, 500);
+      return false;
+    }
+  }
+
   async function dispatch(task) {
     for (const item of readyAssignments(task)) {
       item.status = 'working';
@@ -282,16 +327,28 @@ export function createOpenBotOrchestrator({ dataDir, readAgents, startTask = nul
           text: `${item.callbackMarker} ${item.brief}. Ana görev: ${task.prompt}. Director senden görevin sonunda kısa bir rapor istiyor: yapılanlar, bulgular, sorunlar ve sonraki adım. Raporu orchestrationId ve assignmentId ile geri gönder.`,
           orchestrationId: task.id,
           assignmentId: item.id,
+          dispatchAttempt: item.dispatchAttempt,
           reportRequired: true,
           provider: item.provider,
           model: item.model
         });
-        item.externalTaskId = result?.taskId || null;
-        item.dispatch = result?.ok ? 'sent' : 'failed';
+        if (!result?.ok) {
+          const reason = result?.error || 'OpenBot görevi gönderilemedi';
+          if (!(await retryWithFallback(task, item, reason))) {
+            item.dispatch = 'failed';
+            await healAssignment(task, item, reason);
+          }
+        } else {
+          item.externalTaskId = result.taskId || null;
+          item.dispatch = 'sent';
+        }
       } catch (err) {
-        item.dispatch = 'failed';
-        item.result = clampText(err.message || err, 500);
-        await healAssignment(task, item, err.message || 'Görev gönderilemedi');
+        const reason = err.message || 'Görev gönderilemedi';
+        if (!(await retryWithFallback(task, item, reason))) {
+          item.dispatch = 'failed';
+          item.result = clampText(reason, 500);
+          await healAssignment(task, item, reason);
+        }
       }
     }
     refreshExecutionPlan(task);
@@ -379,7 +436,7 @@ export function createOpenBotOrchestrator({ dataDir, readAgents, startTask = nul
     }
 
     if (status === 'failed' || /model '.*' not found|stream disconnected|blocked/i.test(report)) {
-      await healAssignment(task, item, report);
+      if (!(await retryWithFallback(task, item, report))) await healAssignment(task, item, report);
       task.updatedAt = now();
       await save();
       return publicTask(task);

@@ -30,7 +30,7 @@ type Settings = {
     autoAssignModels?: boolean;
     notifications?: NotificationsConfig;
   };
-  modelRouting: Record<string, { provider: string; model: string }>;
+  modelRouting: Record<string, { provider: string; model: string; fallbackProvider?: string; fallbackModel?: string }>;
   agents: Record<string, AgentSettings>;
 };
 type Overview = {
@@ -856,13 +856,14 @@ function GamificationLeaderboard({ stats }: { stats: GamificationStats[] }) {
 function ModelRouting({ settings, models, onSave, onToggle }: { settings: Settings; models: Model[]; onSave: (values: Settings['modelRouting']) => void; onToggle: (enabled: boolean) => void }) {
   const [routing, setRouting] = useState(settings.modelRouting || {});
   useEffect(() => setRouting(settings.modelRouting || {}), [settings.modelRouting]);
-  const choose = (kind: string, model: string) => setRouting((current) => ({ ...current, [kind]: { provider: 'opencode', model } }));
+  const choose = (kind: string, model: string) => setRouting((current) => ({ ...current, [kind]: { ...current[kind], provider: 'opencode', model } }));
+  const chooseFallback = (kind: string, fallbackModel: string) => setRouting((current) => ({ ...current, [kind]: { ...current[kind], fallbackProvider: 'opencode', fallbackModel } }));
   return (
     <section className="ob-section ob-settings">
       <div className="ob-section-heading">
         <div>
           <h2>Director model yönlendirme</h2>
-          <p className="ob-note">Ücretsiz yerel modelleri görev türüne göre otomatik seçer ve görev gönderirken ilgili ajana uygular.</p>
+          <p className="ob-note">Görev türüne göre ana modeli seçer; başarısız olursa aynı botta yedek modeli dener.</p>
         </div>
         <label className="ob-switch">
           <input type="checkbox" checked={settings.office.autoAssignModels !== false} onChange={(event) => onToggle(event.target.checked)} /> Otomatik atama
@@ -876,16 +877,26 @@ function ModelRouting({ settings, models, onSave, onToggle }: { settings: Settin
       </div>
       <div className="ob-form-grid">
         {routeKinds.map(([kind, label]) => (
-          <label key={kind}>
-            {label}
-            <select value={routing[kind]?.model || ''} onChange={(event) => choose(kind, event.target.value)}>
-              <option value="">Model seçin</option>
-              {models.map((model) => (
-                <option key={`${kind}:${model.model}`} value={model.model}>{model.model}</option>
-              ))}
-            </select>
-            <small>{routing[kind]?.provider || 'atanmamış'}</small>
-          </label>
+          <div key={kind}>
+            <label>
+              {label} · Ana model
+              <select value={routing[kind]?.model || ''} onChange={(event) => choose(kind, event.target.value)}>
+                <option value="">Model seçin</option>
+                {models.map((model) => (
+                  <option key={`${kind}:primary:${model.model}`} value={model.model}>{model.model}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {label} · Yedek model
+              <select value={routing[kind]?.fallbackModel || ''} onChange={(event) => chooseFallback(kind, event.target.value)}>
+                <option value="">Model seçin</option>
+                {models.map((model) => (
+                  <option key={`${kind}:fallback:${model.model}`} value={model.model}>{model.model}</option>
+                ))}
+              </select>
+            </label>
+          </div>
         ))}
       </div>
       <div className="ob-modal-actions">

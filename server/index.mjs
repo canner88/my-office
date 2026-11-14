@@ -99,7 +99,7 @@ const readLocalModelCatalog = () => {
   } catch { /* Ollama is optional; the panel reports an empty catalog. */ }
   return models;
 };
-const openBotTaskStart = async ({ agentId, text, orchestrationId, assignmentId, provider, model }) => {
+const openBotTaskStart = async ({ agentId, text, orchestrationId, assignmentId, dispatchAttempt, provider, model }) => {
   const automation = readOpenBotAutomation();
   const baseUrl = process.env.OPENBOT_TEAM_API_URL?.trim().replace(/\/$/, '') || automation?.url;
   const token = process.env.OPENBOT_TEAM_TOKEN?.trim() || automation?.token;
@@ -116,7 +116,7 @@ const openBotTaskStart = async ({ agentId, text, orchestrationId, assignmentId, 
   const response = await fetch(`${baseUrl}/v1/agents/${encodeURIComponent(agentId)}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ text, clientMessageId: `my-office:${orchestrationId}:${assignmentId}` })
+    body: JSON.stringify({ text, clientMessageId: `my-office:${orchestrationId}:${assignmentId}${dispatchAttempt > 1 ? `:attempt-${dispatchAttempt}` : ''}` })
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body?.error || body?.message || `OpenBot görev API HTTP ${response.status}`);
@@ -135,7 +135,13 @@ const openBotOrchestration = createOpenBotOrchestrator({
   readTaskResult: ({ assignment }) => readOpenBotTaskResult({ agentId: assignment.agentId, marker: assignment.callbackMarker, since: assignment.reportRequestedAt || '' }),
   gamification: openBotGamification,
   notifications: openBotNotifications,
-  modelForCategory: (kind, agent) => openBotSettings.get().office.autoAssignModels === false ? { provider: agent.settings?.provider || '', model: agent.settings?.model || '' } : openBotSettings.getRouting(kind)
+  modelForCategory: (kind, agent) => {
+    const routing = openBotSettings.getRouting(kind);
+    const primary = openBotSettings.get().office.autoAssignModels === false
+      ? { provider: agent.settings?.provider || '', model: agent.settings?.model || '' }
+      : routing;
+    return { ...primary, fallbackProvider: routing.fallbackProvider, fallbackModel: routing.fallbackModel };
+  }
 });
 setInterval(() => { openBotOrchestration.collectResults().catch(() => {}); }, 5000).unref();
 const num = (n, digits) => createT(prefs.lang()).num(n, digits);   // a number written the office's way (1,000 / 1.000)

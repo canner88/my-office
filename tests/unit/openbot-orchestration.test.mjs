@@ -95,6 +95,67 @@ test('orchestrator self-healing watchdog heals failed agent', async () => {
   assert.equal(healedTask.assignments[0].healed, true);
 });
 
+test('orchestrator retries a failed task with its fallback model before changing agents', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'my-office-orch-fallback-'));
+  const agents = [
+    { id: 'coder', name: 'Coder', role: 'Developer', room: 'Kod', enabled: true },
+    { id: 'backup', name: 'Backup', role: 'Developer', room: 'Kod', enabled: true }
+  ];
+  const calls = [];
+  const orch = createOpenBotOrchestrator({
+    dataDir: dir,
+    readAgents: () => agents,
+    modelForCategory: () => ({
+      provider: 'opencode',
+      model: 'ollama/llama3.2:3b',
+      fallbackProvider: 'opencode',
+      fallbackModel: 'ollama/gemma4:latest'
+    }),
+    startTask: async (input) => { calls.push(input); return { ok: true, taskId: `t-${input.agentId}` }; }
+  });
+
+  const created = await orch.create('Build a small API');
+  const working = await orch.advance(created.id);
+  const target = working.assignments[0];
+  const primaryCall = calls.find((call) => call.assignmentId === target.id);
+  assert.equal(primaryCall.model, 'ollama/llama3.2:3b');
+
+  await orch.receiveResult(created.id, target.agentId, "model 'llama3.2:3b' not found", 'failed');
+
+  const fallbackCall = calls.find((call) => call.assignmentId === target.id && call.model === 'ollama/gemma4:latest');
+  assert.equal(fallbackCall.agentId, target.agentId);
+  const retried = orch.get(created.id).assignments.find((item) => item.id === target.id);
+  assert.equal(retried.fallbackUsed, true);
+  assert.equal(retried.healed, false);
+});
+
+test('orchestrator uses the fallback model when the primary dispatch fails', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'my-office-orch-fallback-dispatch-'));
+  const agents = [{ id: 'coder', name: 'Coder', role: 'Developer', room: 'Kod', enabled: true }];
+  const calls = [];
+  const orch = createOpenBotOrchestrator({
+    dataDir: dir,
+    readAgents: () => agents,
+    modelForCategory: () => ({
+      provider: 'opencode',
+      model: 'ollama/llama3.2:3b',
+      fallbackProvider: 'opencode',
+      fallbackModel: 'ollama/gemma4:latest'
+    }),
+    startTask: async (input) => {
+      calls.push(input);
+      if (input.model === 'ollama/llama3.2:3b') throw new Error('Primary model unavailable');
+      return { ok: true, taskId: 'fallback-task' };
+    }
+  });
+
+  const created = await orch.create('Build a small API');
+  const working = await orch.advance(created.id);
+  assert.deepEqual(calls.map((call) => call.model), ['ollama/llama3.2:3b', 'ollama/gemma4:latest']);
+  assert.equal(working.assignments[0].fallbackUsed, true);
+  assert.equal(working.assignments[0].dispatch, 'sent');
+});
+
 test('orchestrator makes duplicate delivery reports idempotent and rejects conflicting reports', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'my-office-orch-idempotency-'));
   const agents = [

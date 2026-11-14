@@ -6,12 +6,12 @@ const THEMES = ['midnight', 'graphite', 'aurora'];
 const DENSITIES = ['comfortable', 'compact', 'focus'];
 const LEVELS = ['ask', 'allow', 'deny'];
 const DEFAULT_MODEL_ROUTING = {
-  engineering: { provider: 'opencode', model: 'ollama/llama3.2:3b' },
-  research: { provider: 'opencode', model: 'ollama/gemma4:latest' },
-  communications: { provider: 'opencode', model: 'ollama/llama3.2:3b' },
-  design: { provider: 'opencode', model: 'ollama/gemma4:latest' },
-  operations: { provider: 'opencode', model: 'ollama/gemma4:latest' },
-  general: { provider: 'opencode', model: 'ollama/llama3.2:3b' },
+  engineering: { provider: 'opencode', model: 'ollama/llama3.2:3b', fallbackProvider: 'opencode', fallbackModel: 'ollama/gemma4:latest' },
+  research: { provider: 'opencode', model: 'ollama/gemma4:latest', fallbackProvider: 'opencode', fallbackModel: 'ollama/gemma4:latest' },
+  communications: { provider: 'opencode', model: 'ollama/llama3.2:3b', fallbackProvider: 'opencode', fallbackModel: 'ollama/gemma4:latest' },
+  design: { provider: 'opencode', model: 'ollama/gemma4:latest', fallbackProvider: 'opencode', fallbackModel: 'ollama/gemma4:latest' },
+  operations: { provider: 'opencode', model: 'ollama/gemma4:latest', fallbackProvider: 'opencode', fallbackModel: 'ollama/gemma4:latest' },
+  general: { provider: 'opencode', model: 'ollama/llama3.2:3b', fallbackProvider: 'opencode', fallbackModel: 'ollama/gemma4:latest' },
 };
 const DEFAULTS = {
   office: {
@@ -63,7 +63,9 @@ function normalizeRouting(input = {}) {
     if (!DEFAULT_MODEL_ROUTING[kind] || !value || typeof value !== 'object') continue;
     const provider = cleanText(value.provider, 60);
     const model = cleanText(value.model, 120);
-    if (provider && model) output[kind] = { provider, model };
+    const fallbackProvider = cleanText(value.fallbackProvider || DEFAULT_MODEL_ROUTING[kind].fallbackProvider, 60);
+    const fallbackModel = cleanText(value.fallbackModel || DEFAULT_MODEL_ROUTING[kind].fallbackModel, 120);
+    if (provider && model && fallbackProvider && fallbackModel) output[kind] = { provider, model, fallbackProvider, fallbackModel };
   }
   return output;
 }
@@ -97,7 +99,9 @@ export function createOpenBotSettings(dataDir) {
   let state = clone(DEFAULTS);
   try {
     const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
-    state = { ...state, ...saved, office: { ...state.office, ...(saved.office || {}) }, modelRouting: { ...state.modelRouting, ...(saved.modelRouting || {}) }, agents: saved.agents || {} };
+    const savedRouting = saved.modelRouting || {};
+    const modelRouting = Object.fromEntries(Object.entries(DEFAULT_MODEL_ROUTING).map(([kind, defaults]) => [kind, { ...defaults, ...(savedRouting[kind] || {}) }]));
+    state = { ...state, ...saved, office: { ...state.office, ...(saved.office || {}) }, modelRouting: normalizeRouting(modelRouting), agents: saved.agents || {} };
   } catch {}
   const save = () => { fs.mkdirSync(dataDir, { recursive: true }); const tmp = `${file}.tmp`; fs.writeFileSync(tmp, JSON.stringify(state, null, 2)); fs.renameSync(tmp, file); };
   return {
