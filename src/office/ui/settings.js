@@ -42,8 +42,8 @@ function setLang(l) {
   fetch(`/api/prefs${TOKEN ? `?k=${encodeURIComponent(TOKEN)}` : ''}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lang: l }) })
     .then((r) => (r.ok ? location.replace(u) : viaUrl())).catch(viaUrl);
 }
-// the four tabs of Settings; the last one opened comes back next time
-const TABS = ['office', 'people', 'display', 'more'];
+// the Settings tabs; the last one opened comes back next time
+const TABS = ['office', 'people', 'display', 'more', 'openbot'];
 let tabNow = 'office';
 function showTab(k, focus = false) {
   if (!TABS.includes(k)) k = 'office';
@@ -53,10 +53,10 @@ function showTab(k, focus = false) {
   try { localStorage.setItem('office-settings-tab', k); } catch { /* storage blocked */ }
   if (k === 'people') requestAnimationFrame(drawPortraits);   // drawn once, the first time
 }
-export function togglePop(open = popLook.hidden) { popLook.hidden = !open; btnLook.setAttribute('aria-expanded', String(open)); if (open) { togglePlan(false); showTab(tabNow); } }
+export function togglePop(open = popLook.hidden) { popLook.hidden = !open; btnLook.setAttribute('aria-expanded', String(open)); if (open) { if (popPlan) togglePlan(false); showTab(tabNow); loadOpenBotSettings(); } }
 let popPlan;
 let btnPlan;
-export function togglePlan(open = popPlan.hidden) { popPlan.hidden = !open; btnPlan.setAttribute('aria-expanded', String(open)); if (open) { togglePop(false); renderLimits(); renderAi(); } }
+export function togglePlan(open = popPlan?.hidden ?? true) { if (!popPlan) return; popPlan.hidden = !open; btnPlan?.setAttribute('aria-expanded', String(open)); if (open) { togglePop(false); renderLimits(); renderAi(); } }
 function setStreamer(v) {
   state.streamer = v; document.body.classList.toggle('is-stream', v); state.boardDirty = true; for (const n of stickyNotes) if (n) n.key = '';
   try { localStorage.setItem('office-stream', v ? 'on' : 'off'); } catch { /* storage blocked */ }
@@ -76,6 +76,30 @@ function setToggle(k, v) {
     toast(tr(v ? 'settings.seasonOn' : 'settings.seasonOff')); setTimeout(() => location.reload(), 300);
   }
   syncToggles();
+}
+async function saveOpenBotSetting(key, value) {
+  const status = $('ob-settings-status');
+  try {
+    const response = await fetch('/api/openbot/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'office', values: { [key]: value } }) });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || !body.ok) throw new Error(body.message || tr('drawer.unreachable'));
+    if (status) status.textContent = tr('settings.openbot.saved');
+    setTimeout(() => { if (status) status.textContent = ''; }, 2200);
+  } catch (error) {
+    if (status) status.textContent = error?.message || tr('drawer.unreachable');
+  }
+}
+function loadOpenBotSettings() {
+  fetch('/api/openbot/settings', { cache: 'no-store' }).then((response) => response.ok ? response.json() : null).then((body) => {
+    const office = body?.settings?.office;
+    if (!office) return;
+    for (const control of popLook.querySelectorAll('[data-ob-setting]')) {
+      const key = control.dataset.obSetting, value = office[key];
+      if (value === undefined) continue;
+      if (control.dataset.obType === 'boolean') control.setAttribute('aria-checked', String(Boolean(value)));
+      else control.value = String(value);
+    }
+  }).catch(() => {});
 }
 export function syncToggles() {
   let seasonOn = true, coachOn = true, drillOn = true; try { seasonOn = localStorage.getItem('office-season') !== 'off'; coachOn = localStorage.getItem('office-coach') !== 'off'; drillOn = localStorage.getItem('office-drill') !== 'off'; } catch { /* storage blocked */ }
@@ -102,7 +126,7 @@ export function setup() {
   document.addEventListener('click', (e) => { if (!popLook.hidden && !e.target.closest('#pop-look, #btn-look')) togglePop(false); });
   // the plan popover, opened from its pill
   popPlan = $('pop-plan'); btnPlan = $('btn-plan');
-  btnPlan.addEventListener('click', (e) => { e.stopPropagation(); togglePlan(); });
+  if (btnPlan) btnPlan.addEventListener('click', (e) => { e.stopPropagation(); togglePlan(); }); // Claude şeridi kaldırılmışsa yoktur
   // (a click on something the card just replaced (a step of adding an account) isn't a click outside it)
   document.addEventListener('click', (e) => { if (!popPlan.hidden && e.target.isConnected && !e.target.closest('#pop-plan, #btn-plan')) togglePlan(false); });
   popLook.addEventListener('click', (e) => {
@@ -114,7 +138,15 @@ export function setup() {
     const lg = e.target.closest('[data-lang]'); if (lg) { setLang(lg.dataset.lang); return; }
     const tm = e.target.closest('[data-time]'); if (tm) { needWorld(); setTimeMode(tm.dataset.time); return; }
     const qb = e.target.closest('[data-quality]'); if (qb) { needWorld(); setQuality(qb.dataset.quality); return; }
+    const ob = e.target.closest('[data-ob-setting][data-ob-type="boolean"]'); if (ob) { const value = ob.getAttribute('aria-checked') !== 'true'; ob.setAttribute('aria-checked', String(value)); saveOpenBotSetting(ob.dataset.obSetting, value); return; }
     const tg = e.target.closest('[data-tgl]'); if (tg) setToggle(tg.dataset.tgl, tg.getAttribute('aria-checked') !== 'true');
+  });
+  popLook.addEventListener('change', (e) => {
+    const ob = e.target.closest('[data-ob-setting]:not([data-ob-type="boolean"])');
+    if (ob) {
+      if (ob.dataset.obSetting === 'nightMode') { needWorld(); setTimeMode(ob.value); }
+      saveOpenBotSetting(ob.dataset.obSetting, ob.value);
+    }
   });
   document.body.classList.toggle('is-stream', state.streamer);
   // graphics: the picked button, and which level Auto is using now

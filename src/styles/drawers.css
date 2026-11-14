@@ -112,3 +112,26 @@
 .is-phone .dr-actions > .dr-note:not(.dr-qr + .dr-note) { display: none; }
 .is-phone .tabs { margin-top: 10px; }
 .is-phone .dr-body { padding-top: 12px; }
+
+/* Director orchestration panel */
+.director-chat { flex: none; display: grid; gap: 9px; padding: 12px 14px; border-top: 1px solid var(--line); background: linear-gradient(180deg, color-mix(in srgb, var(--side) 92%, #4c6fff 8%), var(--side)); }
+.director-chat-title, .director-chat-actions, .director-chat-meeting { display: flex; align-items: center; gap: 8px; }
+.director-chat-title { color: var(--text-strong); }
+.director-chat-title svg { color: var(--accent); }
+.director-chat-live { margin-left: auto; font-size: 11px; color: var(--muted); }
+.director-chat-input { width: 100%; min-height: 76px; resize: vertical; border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px; color: var(--text); background: var(--bg); font: inherit; }
+.director-chat-actions { flex-wrap: wrap; }
+.director-chat-status { font-size: 12px; color: var(--muted); }
+.director-chat-board { display: grid; gap: 8px; }
+.director-chat-meeting { justify-content: space-between; font-size: 12px; color: var(--text-strong); }
+.director-chat-meeting span { color: var(--muted); }
+.director-chat-assignments { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.director-chat-assignment { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--bg) 82%, transparent); }
+.director-chat-assignment > div { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.director-chat-assignment small, .director-chat-assignment em { color: var(--muted); font-size: 11px; font-style: normal; }
+.director-chat-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.director-chat-assignment.is-completed .director-chat-dot { background: #39b879; }
+.director-chat-assignment.is-completed em { color: #39b879; }
+.director-chat-finish { justify-self: start; }
+.director-chat-report { max-height: 220px; overflow: auto; white-space: pre-wrap; padding: 10px; margin: 0; border-radius: 8px; background: var(--bg); color: var(--text); font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.director-chat-speak { justify-self: start; }

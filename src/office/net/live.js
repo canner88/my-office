@@ -5,10 +5,12 @@ import { state } from '../core/state.js';
 import { $, el, short } from '../core/env.js';
 import { scene } from '../scene/renderer.js';
 import { CHAIR_IDLE, DESKS, PODS, UNITS, chairs, unitOfDesk } from '../world/desks.js';
+import { allocate } from '../people/navigation.js';
 import { canvasTex } from '../scene/blocks.js';
 import { DEPTS } from '../world/layout.js';
-import { DEPT_SIGNS } from '../world/pro/wing.js';
+import { DEPT_SIGNS, ROOM_NAMES } from '../world/pro/wing.js';
 import { PALETTE, addWorker, dn, dropSub, hash, leaving, leavingIds, sessions, spawnSub, subs, trimLeaving, workers } from '../people/workers.js';
+import { director } from '../people/director.js';
 import { queueUi } from '../ui/activity.js';
 import { closeSession } from '../ui/session-drawer.js';
 import { t as tr } from '../../i18n/index.js';
@@ -25,6 +27,9 @@ const projOf = (s) => s?.git?.repo || String(s?.dir || '').split('/').filter(Boo
 // partners sit face to face across a pod's screen (back-left, then front-right…): one faces the camera, the other's
 // screens do; a room fills its first pod before the second
 const SEAT_ORDER = [0, 3, 1, 2, 4, 7, 5, 6];
+// OpenBot rooms. Unit 4 is the open-floor pod nearest the camera. Units 8 and 9 are the
+// front department rooms; unit 6 is the back room for everyone else.
+const ROOM_FIRST = { 'Yönetim': 4, 'Mesaj': 8, 'Kod': 9, 'Çalışma': 6 };
 const AREAS_KEY = 'office-areas';
 /** the area a project last had on this device (people/farewell.js), or -1 */
 export const areaOf = (proj) => { const u = homes[proj]?.[0]; return u != null && u < UNITS.length ? u : -1; };
@@ -49,8 +54,12 @@ function proDesk(s) {
   let d = -1;
   const room = mine.find((u) => free(u).length);   // 1. its area, a desk free
   if (room != null) d = free(room)[0];
-  if (d < 0) { const u = (homes[proj] || []).find((x) => x < UNITS.length && empty(x)); if (u != null) d = claim(u); }   // 2. where it sat before
-  if (d < 0) {   // 3. a free area: next to its own, else one nobody calls home
+  if (d < 0) {   // 2. a named room keeps its own area, in front for management
+    const want = ROOM_FIRST[proj];
+    if (want != null && want < UNITS.length && free(want).length && (empty(want) || rowTeam.get(want) === proj)) d = empty(want) ? claim(want) : free(want)[0];
+  }
+  if (d < 0) { const u = (homes[proj] || []).find((x) => x < UNITS.length && empty(x)); if (u != null) d = claim(u); }   // 3. where it sat before
+  if (d < 0) {   // 4. a free area: next to its own, else one nobody calls home
     const claimed = new Set(Object.entries(homes).filter(([p]) => p !== proj).flatMap(([, us]) => us));
     const pick = all.filter(empty).sort((a, b) => (mine.length ? Math.min(...mine.map((m) => near(a, m))) - Math.min(...mine.map((m) => near(b, m))) : 0) || (claimed.has(a) - claimed.has(b)) || a - b)[0];
     if (pick != null) d = claim(pick);
@@ -76,7 +85,7 @@ export function updateTeamTags() {
     const projs = [...new Set(people.map(projOf))], name = nameOf(u), chip = here[u].length && !(joined && twin < u);
     const key = here[u].length ? `${name}|${projs.length}|${people.length}|${chip}` : '';
     if (key === tg.key) return; tg.key = key; tg.o.visible = !!chip; if (tg.rug) tg.rug.visible = !!here[u].length;
-    const dept = UNITS[u].dept; if (dept >= 0) DEPT_SIGNS[dept]?.(here[u].length ? name : '');   // the room's door plaque
+    const dept = UNITS[u].dept; if (dept >= 0) DEPT_SIGNS[dept]?.(ROOM_NAMES[dept]);   // kapıda sabit oda adı
     if (!here[u].length) return;
     const colour = PALETTE[hash(name) % PALETTE.length];
     tg.rug?.material.color.set(colour);
@@ -88,9 +97,21 @@ export function updateTeamTags() {
     tg.o.element.title = projs.length > 1 ? tr('activity.live.teamShared', { name, others: projs.slice(1).join(', ') }) : tr('activity.live.teamTitle', { name });
   });
 }
+function adoptBoss(s) {
+  if (!s?.boss || !director) return false;
+  if (deskOf.has(s.id)) freeDesk(s.id);
+  s.desk = -1;
+  sessions.set(s.id, s);
+  const w = workers.get(s.id);
+  if (w) { workers.delete(s.id); leavingIds.add(s.id); leaving.add(w); trimLeaving(); w.leave(() => leavingIds.delete(s.id)); }
+  director.bind(s);
+  queueUi();
+  return true;
+}
 export function upsertSession(s, walkIn = true) {
   // (no 3D yet, the 2D list opened first: no desk and nobody at it; core/world-boot.js seats everyone once it is built)
-  if (!state.world) { s.desk = -1; sessions.set(s.id, s); queueUi(); return; }
+  if (!state.world) { s.desk = -1; sessions.set(s.id, s); if (s.boss && director) director.bind(s); queueUi(); return; }
+  if (adoptBoss(s)) return;
   s.desk = proDesk(s);   // (every layout: the project's area)
   const had = sessions.has(s.id);
   sessions.set(s.id, s);
@@ -107,6 +128,33 @@ export function upsertSession(s, walkIn = true) {
   }
   queueUi();
 }
+const ORCHESTRATION_TEXT = {
+  meeting: 'Toplantı masası: görev kapsamı ve sorumluluklar netleştiriliyor',
+  regroup: 'Lonca masası: ajan çıktıları Director için birleştiriliyor',
+  completed: 'Görev raporu hazır; Director’a iletildi',
+};
+const stationAnim = { meeting: 'think', brief: 'think', library: 'read', board: 'board', globe: 'globe', server: 'console', director: 'think', dining: 'eat' };
+
+/** Move live OpenBot workers through meaningful office zones for an orchestration task. */
+export function applyOrchestrationTask(task) {
+  if (!task?.assignments?.length) return;
+  const phase = task.phase || (task.status === 'completed' ? 'completed' : task.status === 'regroup' ? 'regroup' : task.status === 'meeting' ? 'meeting' : 'working');
+  for (const item of task.assignments) {
+    const worker = workers.get(item.agentId);
+    if (!worker || worker.leaving) continue;
+    if (phase === 'meeting' || phase === 'regroup') {
+      worker.push({ station: 'meeting', anim: 'think', type: 'agent', text: ORCHESTRATION_TEXT[phase], dwell: phase === 'regroup' ? 3.5 : 2.2 });
+      continue;
+    }
+    if (phase === 'completed') {
+      worker.push({ station: 'meeting', anim: 'think', type: 'agent', text: ORCHESTRATION_TEXT.completed, dwell: 2.5, after: () => worker.push({ station: 'desk', anim: 'type', type: 'agent', text: 'Rapor tamamlandı; sıradaki göreve hazır.' }) });
+      continue;
+    }
+    const station = item.workStation || 'meeting';
+    worker.push({ station, anim: stationAnim[station] || 'think', type: 'agent', text: `${item.zone || 'Görev'} · ${item.brief || task.prompt}`, dwell: 2.5 });
+  }
+}
+
 export function removeSession(id) {
   const s = sessions.get(id); sessions.delete(id); freeDesk(id);
   const w = workers.get(id);

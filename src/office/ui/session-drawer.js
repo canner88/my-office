@@ -18,6 +18,7 @@ import { renderCompose, setupCompose } from './session-compose.js';
 import { openUndo } from './undo-view.js';
 import { t as tr, locale } from '../../i18n/index.js';
 import { modelLong } from '../../shared/model-name.js';
+import { mountDirectorChat } from './director-chat.js';
 
 /* ---------- session drawer ---------- */
 export let tab = 'chat';
@@ -39,6 +40,8 @@ export function openSession(id, opts = {}) {
   state.subView = opts.agent || null;
   setTab(opts.tab || 'chat');
   renderSessionHead(); renderActions(); renderCompose();
+  if (sessions.get(id)?.boss) mountDirectorChat(drS);
+  else drS.querySelector('#director-chat')?.remove();
   loadLog(true);
   queueUi();
 }

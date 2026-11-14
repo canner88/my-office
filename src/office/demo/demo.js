@@ -24,24 +24,22 @@ export let DEMO;
 // The fictional projects. Paths, search terms and commands are the same in every language; what people write (prompts,
 // a command's description, what needs approval) comes from the demo dictionary, read when the demo starts.
 function demoProjects() {
-  const d = (k) => tr(`demo.tasks.${k}`);
   return [
-    { name: 'shop-api', dir: '~/projects/shop-api', tasks: [
-      { prompt: d('cart.prompt'), steps: [['read', 'src/routes/cart.ts'], ['grep', 'paginate'], ['edit', 'src/routes/cart.ts'], ['test', d('cart.test'), 'fail', 'npm test'], ['edit', 'src/routes/cart.test.ts'], ['test', d('cart.retest'), 'ok', 'npm test']], wait: d('cart.wait') },
-      { prompt: d('shipping.prompt'), steps: [['grep', 'shippingFee'], ['read', 'src/lib/shipping.ts'], ['edit', 'src/lib/shipping.ts'], ['test', d('shipping.test'), null, 'vitest']], deploy: 'v2.4.1' } ] },
-    { name: 'landing-page', dir: '~/projects/landing-page', tasks: [
-      { prompt: d('hero.prompt'), steps: [['read', 'app/page.tsx'], ['read', 'components/Hero.tsx'], ['edit', 'components/Hero.tsx'], ['write', 'components/HeroArt.tsx'], ['bash', d('hero.build')], ['fetch', 'dribbble.com']], sub: ['general-purpose', d('hero.sub')] },
-      { prompt: d('images.prompt'), steps: [['glob', 'public/**/*.png'], ['bash', d('images.webp')], ['edit', 'next.config.ts'], ['bash', d('images.lighthouse')]] } ] },
-    { name: 'data-pipeline', dir: '~/projects/data-pipeline', tasks: [
-      { prompt: d('orders.prompt'), steps: [['read', 'etl/orders.py'], ['edit', 'etl/orders.py'], ['test', d('orders.pytest'), null, 'pytest'], ['web', 'pandas drop_duplicates subset']], sub: ['Explore', d('orders.sub')] },
-      { prompt: d('schedule.prompt'), steps: [['read', 'airflow/dags/daily.py'], ['edit', 'airflow/dags/daily.py'], ['bash', d('schedule.check')]], wait: d('schedule.wait') } ] },
-    { name: 'mobile-app', dir: '~/projects/mobile-app', tasks: [
-      { prompt: d('login.prompt'), steps: [['read', 'src/screens/Login.tsx'], ['web', 'expo auth session google'], ['edit', 'src/screens/Login.tsx'], ['bash', d('login.typecheck')]] },
-      { prompt: d('keyboard.prompt'), steps: [['grep', 'KeyboardAvoidingView'], ['edit', 'src/components/Form.tsx'], ['test', d('keyboard.uiTest'), null, 'playwright']] } ] },
-    { name: 'docs-site', dir: '~/projects/docs-site', tasks: [
-      { prompt: d('install.prompt'), steps: [['read', 'docs/intro.md'], ['write', 'docs/install.md'], ['bash', d('install.build')]], deploy: 'docs' } ] },
-    { name: 'infra', dir: '~/projects/infra', tasks: [
-      { prompt: d('staging.prompt'), steps: [['read', 'terraform/staging.tf'], ['edit', 'terraform/staging.tf'], ['bash', 'terraform plan']], wait: d('staging.wait') } ] },
+    { name: 'ofis-yonetimi', dir: '~/ofis/yonetim', tasks: [
+      { prompt: 'Ofisi aç ve ajan durumunu raporla', steps: [['read', 'server/index.mjs'], ['read', 'server/openbot-source.mjs'], ['bash', 'node server/index.mjs --dev'], ['plan', 'ajanı uygun masaya taşı']], deploy: 'http://localhost:4310' },
+      { prompt: 'Dürbün: bekleyen ajanı ve düşen ofisi bildir', steps: [['read', 'data/state.json'], ['agent', 'görev masası'], ['write', 'rapor.txt']] } ] },
+    { name: 'mesaj-yonetimi', dir: '~/ofis/mesaj', tasks: [
+      { prompt: 'Gelen WhatsApp mesajını ilgili ajana yönlendir', steps: [['read', 'whatsapp-gelen.json'], ['mcp', 'whatsapp'], ['agent', 'support reply desk'], ['write', 'yanit-hazirlandi.md']] },
+      { prompt: 'Telegram grubundaki soruyu cevapla ve kaydet', steps: [['read', 'telegram-gelen.json'], ['web', 'telegram bot api'], ['edit', 'sozluk.md'], ['write', 'cevap.txt']] } ] },
+    { name: 'kod-incelenmesi', dir: '~/ofis/kod', tasks: [
+      { prompt: 'topbar.js"ndeki Claude plan şeridini kaldır ve testi çalıştır', steps: [['read', 'src/office/ui/topbar.js'], ['grep', 'btn-plan'], ['edit', 'src/office/ui/topbar.js'], ['test', 'topbar-js-test', 'ok', 'npm test']] },
+      { prompt: 'openbot-source.mjs"da eylem eşlemesini genişlet', steps: [['read', 'server/openbot-source.mjs'], ['edit', 'server/openbot-source.mjs'], ['bash', 'node --check server/openbot-source.mjs']] } ] },
+    { name: 'prototip', dir: '~/ofis/prototip', tasks: [
+      { prompt: 'Yeni lokal beceri için tıklanabilir prototip aç', steps: [['write', 'index.html'], ['write', 'style.css'], ['write', 'app.js'], ['bash', 'npx serve .'], ['fetch', 'http://localhost:3000']], deploy: 'lokal site' },
+      { prompt: 'Prototip tıklama yolunu ekran görüntüsü ile kaydet', steps: [['bash', 'openbot-browser screenshot'], ['write', 'click-yolu.md'], ['skill', 'distinctive-frontend-design']] } ] },
+    { name: 'arastirma', dir: '~/ofis/arastirma', tasks: [
+      { prompt: 'MCP sunucu bağlanma hatalarını ara ve raporla', steps: [['web', 'MCP connection debug'], ['read', 'server/otel.mjs'], ['skill', 'mcp-diagnostic'], ['write', 'rapor.md']] },
+      { prompt: 'Ollama model listesini al ve OpenBot"a tanımla', steps: [['bash', 'ollama list'], ['write', 'modeller.txt'], ['agent', 'görev masası']] } ] },
   ];
 }
 let demoSeq = 0, demoReleases = 3;

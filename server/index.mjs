@@ -51,6 +51,11 @@ import { managedEnvs, otelOwner } from './otel-setup.mjs';
 import { pickLang, createT } from '../src/i18n/index.js';
 import { createLiftService } from './lift-service.mjs';
 import { dataDir } from './data-dir.mjs';
+import { readOpenBotAgents, readOpenBotOverview, readOpenBotTicker, readOpenBotTaskResult, readOpenBotMessagingConnections, startOpenBot } from './openbot-source.mjs';
+import { createOpenBotSettings } from './openbot-settings.mjs';
+import { createOpenBotOrchestrator } from './openbot-orchestration.mjs';
+import { createOpenBotGamification } from './openbot-gamification.mjs';
+import { createOpenBotNotifications } from './openbot-notifications.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.OFFICE_PORT) || 4310;
@@ -70,6 +75,69 @@ let pins = {}; try { pins = JSON.parse(fs.readFileSync(PINS_FILE, 'utf8')) || {}
 const undo = createUndo({ dir: path.join(DATA_DIR, 'undo') });
 const PAGE_FILES = new Set(['/favicon.ico', '/icon.svg', '/apple-icon.png', '/opengraph-image.jpg', '/twitter-image.jpg', '/manifest.webmanifest', '/sw.js', '/icon-512.png']);   // (app/: the tab icons, the share card, the app on a phone's home screen; public/: its worker and big icon)
 const prefs = createPrefs(DATA_DIR), { tr } = prefs;   // tr('area.key', vars): words in the office's language (src/i18n)
+const openBotSettings = createOpenBotSettings(DATA_DIR);
+const OPENBOT_AUTOMATION_ROOT = path.join(process.env.APPDATA || path.join(HOME, 'AppData', 'Roaming'), 'OpenBot', 'automation');
+const readOpenBotAutomation = () => {
+  try {
+    const url = fs.readFileSync(path.join(OPENBOT_AUTOMATION_ROOT, 'url'), 'utf8').trim().replace(/\/$/, '');
+    const token = fs.readFileSync(path.join(OPENBOT_AUTOMATION_ROOT, 'token'), 'utf8').trim();
+    return url && token ? { url, token } : null;
+  } catch {
+    return null;
+  }
+};
+const readLocalModelCatalog = () => {
+  const models = [];
+  try {
+    const output = execFileSync('ollama', ['list'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+    for (const line of String(output).split(/\r?\n/).slice(1)) {
+      const fields = line.trim().split(/\s{2,}/);
+      const name = fields[0]?.trim();
+      const size = fields[2]?.trim();
+      if (name && size) models.push({ provider: 'opencode', model: `ollama/${name}`, name, size, free: true, local: true });
+    }
+  } catch { /* Ollama is optional; the panel reports an empty catalog. */ }
+  return models;
+};
+const openBotTaskStart = async ({ agentId, text, orchestrationId, assignmentId, provider, model }) => {
+  const automation = readOpenBotAutomation();
+  const baseUrl = process.env.OPENBOT_TEAM_API_URL?.trim().replace(/\/$/, '') || automation?.url;
+  const token = process.env.OPENBOT_TEAM_TOKEN?.trim() || automation?.token;
+  if (!baseUrl || !token) throw new Error('OpenBot yerel otomasyon bağlantısı bulunamadı.');
+  if (provider && model) {
+    const settingsResponse = await fetch(`${baseUrl}/v1/agents/${encodeURIComponent(agentId)}/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ provider, model })
+    });
+    const settingsBody = await settingsResponse.json().catch(() => ({}));
+    if (!settingsResponse.ok) throw new Error(settingsBody?.error || settingsBody?.message || `OpenBot model ayarı HTTP ${settingsResponse.status}`);
+  }
+  const response = await fetch(`${baseUrl}/v1/agents/${encodeURIComponent(agentId)}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ text, clientMessageId: `my-office:${orchestrationId}:${assignmentId}` })
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error || body?.message || `OpenBot görev API HTTP ${response.status}`);
+  return { ok: true, taskId: body?.deliveryId || body?.task?.id || body?.taskId || body?.id || null };
+};
+const openBotGamification = createOpenBotGamification(DATA_DIR);
+const openBotNotifications = createOpenBotNotifications({
+  getSettings: () => openBotSettings.get(),
+  automation: readOpenBotAutomation(),
+  readConnections: readOpenBotMessagingConnections
+});
+const openBotOrchestration = createOpenBotOrchestrator({
+  dataDir: DATA_DIR,
+  readAgents: readOpenBotAgents,
+  startTask: openBotTaskStart,
+  readTaskResult: ({ assignment }) => readOpenBotTaskResult({ agentId: assignment.agentId, marker: assignment.callbackMarker, since: assignment.reportRequestedAt || '' }),
+  gamification: openBotGamification,
+  notifications: openBotNotifications,
+  modelForCategory: (kind, agent) => openBotSettings.get().office.autoAssignModels === false ? { provider: agent.settings?.provider || '', model: agent.settings?.model || '' } : openBotSettings.getRouting(kind)
+});
+setInterval(() => { openBotOrchestration.collectResults().catch(() => {}); }, 5000).unref();
 const num = (n, digits) => createT(prefs.lang()).num(n, digits);   // a number written the office's way (1,000 / 1.000)
 setI18n({ tr, num, lang: prefs.lang });   // the Mac drawer's tips (system.mjs) speak the same language
 const DESKS = 9;
@@ -334,7 +402,7 @@ function freeDesk() {
 const pubSub = (x) => ({ id: x.id, type: x.type, desc: x.desc || '', last: x.last || null, startedAt: x.startedAt, endedAt: x.endedAt || null, steps: x.steps || 0, model: x.model || '' });
 const pub = (s) => ({ id: s.id, pid: s.pid, name: s.name, title: s.title || '', dir: tilde(s.cwd), link: s.link, desk: s.desk, status: s.status, lastPrompt: s.lastPrompt && oneLine(unwrapPaste(s.lastPrompt)),
   taskStart: s.taskStart, counts: s.counts, subs: Object.values(s.subs).map(pubSub), doneSubs: (s.doneSubs || []).map(pubSub), last: s.last, acct: acctOf(s),
-  entry: s.entry || '', moved: s.parked ? { to: acctShown(s.parked.to), at: s.parked.at } : null,
+  entry: s.entry || '', boss: !!s.boss, moved: s.parked ? { to: acctShown(s.parked.to), at: s.parked.at } : null,
   lastAt: s.lastEventAt || s.createdAt, doneAt: s.doneAt || 0, todos: s.todos || [], lastReply: s.lastReply || '', origin: s.origin || '',
   bg: s.bg ? [...s.bg.values()].slice(0, 6) : [],
   dayFirst: s.dayFirst || null,
@@ -344,7 +412,10 @@ const pub = (s) => ({ id: s.id, pid: s.pid, name: s.name, title: s.title || '', 
   undo: s.sid ? undo.info(s.sid) : null,
   git: gitOf(s),
   usage: s.usage?.model ? { cost: Math.round(s.usage.cost * 100) / 100, ...liveCtx(s), model: s.usage.model, out: s.usage.out } : null });
-function gitOf(s) { const r = s.cwd && git.repoOf(s.cwd); return r ? { repo: r.name, branch: r.branch, dirty: r.dirty, ahead: r.ahead, ci: r.ci, ciName: r.ciName, ciUrl: r.ciUrl, born: r.born || null } : null; }
+function gitOf(s) {
+  if (s.openbot && s.room) return { repo: s.room, branch: '', dirty: 0, ahead: 0, ci: null };
+  const r = s.cwd && git.repoOf(s.cwd); return r ? { repo: r.name, branch: r.branch, dirty: r.dirty, ahead: r.ahead, ci: r.ci, ciName: r.ciName, ciUrl: r.ciUrl, born: r.born || null } : null;
+}
 // context: exact from the status line while it reports (last 15 min), else estimated from the transcript
 const liveCtx = (s) => (s.live?.ctxMax && s.live.ctx != null && Date.now() - s.live.at < 15 * 60e3 ? { ctx: s.live.ctx, ctxMax: s.live.ctxMax, exact: true } : { ctx: s.usage.ctx, ctxMax: ctxMax(s.usage) });
 
@@ -969,6 +1040,7 @@ setInterval(() => {
   rollDay();
   const now = Date.now();
   for (const [key, s] of sessions) {
+    if (s.openbot) continue;   // OpenBot source owns these; a quiet poll must not send them home
     // Claude went quiet without a Stop event (e.g. interrupted): let the chibi rest. A long tool run (a build, a test
     // suite) is not quiet; a tool still open after 10 minutes probably lost its PostToolUse.
     if (s.status === 'work' && !s.busy && (!s.inTool || now - s.lastEventAt > 600_000) && now - s.lastEventAt > 20_000) { s.status = 'rest'; broadcast({ k: 'sess', s: pub(s) }); }
@@ -3184,6 +3256,101 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
+  if (url.pathname === '/api/openbot/models' && req.method === 'GET') { json(res, 200, { ok: true, models: readLocalModelCatalog(), updatedAt: new Date().toISOString() }); return; }
+  if (url.pathname === '/api/openbot/settings' && (req.method === 'GET' || req.method === 'POST')) {
+    const sameOrigin = sameOriginOf(req);
+    if (!authorized(req, url) || !sameOrigin || (req.method === 'POST' && !String(req.headers['content-type'] || '').startsWith('application/json'))) {
+      json(res, 403, { ok: false, message: tr('server.forbidden') }); return;
+    }
+    if (req.method === 'GET') {
+      try {
+        const settings = openBotSettings.get();
+        const agents = readOpenBotAgents().map((agent) => ({ ...agent, settings: settings.agents[agent.id] || {} }));
+        json(res, 200, { ok: true, settings, agents });
+      } catch (err) { console.error('OpenBot settings:', err.message); json(res, 503, { ok: false, message: 'OpenBot settings are unavailable' }); }
+      return;
+    }
+    readJson(req, 24_000).then((body) => {
+      try {
+        let settings;
+        if (body?.scope === 'office') settings = openBotSettings.setOffice(body.values || {});
+        else if (body?.scope === 'agent') settings = openBotSettings.setAgent(body.id, body.values || {});
+        else if (body?.scope === 'model-routing') settings = openBotSettings.setModelRouting(body.values || {});
+        else if (body?.scope === 'reset-agent') settings = openBotSettings.resetAgent(body.id);
+        else if (body?.scope === 'reset-all') settings = openBotSettings.resetAll();
+        else { json(res, 400, { ok: false, message: 'Unknown settings scope' }); return; }
+        fsp.appendFile(ACTION_LOG, `${new Date().toISOString()} openbot settings ${body.scope}\n`).catch(() => {});
+        json(res, 200, { ok: true, settings });
+      } catch (err) { json(res, 400, { ok: false, message: String(err.message || err) }); }
+    });
+    return;
+  }
+  if (url.pathname === '/api/openbot/orchestration' && (req.method === 'GET' || req.method === 'POST')) {
+    const sameOrigin = sameOriginOf(req);
+    if (!authorized(req, url) || !sameOrigin || (req.method === 'POST' && !String(req.headers['content-type'] || '').startsWith('application/json'))) {
+      json(res, 403, { ok: false, message: tr('server.forbidden') }); return;
+    }
+    if (req.method === 'GET') {
+      const id = url.searchParams.get('id');
+      const task = id ? openBotOrchestration.get(id) : null;
+      json(res, 200, task ? { ok: true, task } : openBotOrchestration.list());
+      return;
+    }
+    readJson(req, 40_000).then(async (body) => {
+      try {
+        if (body?.op === 'create') {
+          const task = await openBotOrchestration.create(body.prompt, { peerReview: body.peerReview, stages: body.stages });
+          fsp.appendFile(ACTION_LOG, `${new Date().toISOString()} openbot orchestration create ${task.id}\n`).catch(() => {});
+          json(res, 200, { ok: true, task }); return;
+        }
+        if (body?.op === 'advance') { json(res, 200, { ok: true, task: await openBotOrchestration.advance(body.id) }); return; }
+        if (body?.op === 'result') { json(res, 200, { ok: true, task: await openBotOrchestration.receiveResult(body.id, body.agentId, body.result, body.status || 'completed') }); return; }
+        if (body?.op === 'peer_review') { json(res, 200, { ok: true, task: await openBotOrchestration.reviewPeer(body.id, body.assignmentId, body.review || {}) }); return; }
+        if (body?.op === 'complete') { json(res, 200, { ok: true, task: await openBotOrchestration.complete(body.id, body.results || {}) }); return; }
+        if (body?.op === 'update') { json(res, 200, { ok: true, task: await openBotOrchestration.update(body.id, body.patch || {}) }); return; }
+        json(res, 400, { ok: false, message: 'Unknown orchestration operation' });
+      } catch (err) { json(res, 400, { ok: false, message: String(err.message || err) }); }
+    }).catch(() => json(res, 400, { ok: false, message: tr('server.badRequest') }));
+    return;
+  }
+  if (url.pathname === '/api/openbot/commands' && req.method === 'POST') {
+    const sameOrigin = sameOriginOf(req);
+    if (!authorized(req, url) || !sameOrigin || !String(req.headers['content-type'] || '').startsWith('application/json')) {
+      json(res, 403, { ok: false, message: tr('server.forbidden') }); return;
+    }
+    readJson(req, 12_000).then(async (body) => {
+      try {
+        const agentId = String(body?.agentId || '').trim();
+        const text = String(body?.text || '').trim().slice(0, 4000);
+        if (!agentId || !text) throw new Error('Bot ve emir metni zorunludur.');
+        const agent = readOpenBotAgents().find((item) => item.id === agentId);
+        if (!agent) throw new Error('Seçilen bot bulunamadı.');
+        if (agent.settings?.enabled === false) throw new Error('Bu bot pasif durumda.');
+        const commandId = crypto.randomUUID();
+        const settings = openBotSettings.getAgent(agentId);
+        const result = await openBotTaskStart({
+          agentId,
+          text: `[Director doğrudan emri] ${text}`,
+          orchestrationId: `direct:${commandId}`,
+          assignmentId: 'direct-command',
+          provider: settings.provider,
+          model: settings.model
+        });
+        fsp.appendFile(ACTION_LOG, `${new Date().toISOString()} openbot direct command ${commandId} ${agentId}\n`).catch(() => {});
+        json(res, 200, { ok: true, commandId, agent: { id: agent.id, name: agent.name, role: agent.role }, taskId: result.taskId || null });
+      } catch (err) { json(res, 400, { ok: false, message: String(err.message || err) }); }
+    }).catch(() => json(res, 400, { ok: false, message: tr('server.badRequest') }));
+    return;
+  }
+  if (url.pathname === '/api/openbot/notifications/test' && req.method === 'POST') {
+    const sameOrigin = sameOriginOf(req);
+    if (!authorized(req, url) || !sameOrigin) { json(res, 403, { ok: false, message: tr('server.forbidden') }); return; }
+    readJson(req, 10_000).then(async (body) => {
+      try { const result = await openBotNotifications.test(body?.config, { channel: body?.channel || 'all' }); json(res, 200, result); }
+      catch (err) { json(res, 400, { ok: false, message: String(err.message || err) }); }
+    }).catch(() => json(res, 400, { ok: false, message: tr('server.badRequest') }));
+    return;
+  }
   // The page's own files (bundles, fonts, the QR library, the icons and share card in app/): public, no token needed.
   // In development also Next's overlay.
   if (url.pathname.startsWith('/_next/') || url.pathname.startsWith('/assets/') || PAGE_FILES.has(url.pathname) || (DEV && url.pathname.startsWith('/__nextjs'))) { nextHandle(req, res); return; }
@@ -3199,6 +3366,27 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/api/tenure') { json(res, 200, tenureOut()); return; }
   if (url.pathname === '/api/cache') { json(res, 200, { ok: true, nudge: !!prefs.get('cacheNudge') }); return; }
   if (url.pathname === '/api/tasks') { json(res, 200, tasksOut(isLoopback(req))); return; }
+  if (url.pathname === '/api/openbot/overview') {
+    try { json(res, 200, readOpenBotOverview()); }
+    catch (err) { console.error('OpenBot overview:', err.message); json(res, 503, { ok: false, message: 'OpenBot data is unavailable' }); }
+    return;
+  }
+  if (url.pathname === '/api/openbot/orchestration') {
+    const id = url.searchParams.get('id');
+    const task = id ? openBotOrchestration.get(id) : null;
+    json(res, 200, task ? { ok: true, task } : openBotOrchestration.list());
+    return;
+  }
+  if (url.pathname === '/api/openbot/ticker') {
+    try { json(res, 200, { ok: true, items: readOpenBotTicker() }); }
+    catch (err) { console.error('OpenBot ticker:', err.message); json(res, 503, { ok: false, message: 'Ticker verisi okunamadı' }); }
+    return;
+  }
+  if (url.pathname === '/api/openbot/gamification') {
+    try { json(res, 200, { ok: true, stats: openBotGamification.getAllStats(readOpenBotAgents()) }); }
+    catch (err) { console.error('OpenBot gamification:', err.message); json(res, 503, { ok: false, message: 'Gamification verisi okunamadı' }); }
+    return;
+  }
   if (url.pathname === '/api/quick') { let list = null; try { list = JSON.parse(fs.readFileSync(QUICK_FILE, 'utf8')); } catch { /* the page's own until you change them */ } json(res, 200, { ok: true, list }); return; }
   if (url.pathname === '/api/claude-version') { json(res, 200, { ok: true, ...claudeVersion.get() }); return; }   // (a new one: someone goes to Thế Giới Di Động, outings.js)
   if (url.pathname === '/api/push') { json(res, 200, { ok: true, key: push.publicKey, count: push.count(), on: push.has(String(url.searchParams.get('endpoint') || '')) }); return; }
@@ -3290,7 +3478,7 @@ const server = http.createServer((req, res) => {
     sysSnapshot({ open: url.searchParams.has('open') }).then((snap) => json(res, 200, { ...snap, claude: claudeRows(snap.claude), auto: { hours: prefs.autoClose(), last: autoLast[0] || null } })).catch((err) => json(res, 500, { error: String(err.message || err) }));
     return;
   }
-  if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname === '/panel') {
+  if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname === '/panel' || url.pathname === '/openbot') {
     // the office page itself is rendered by Next.js (app/page.tsx), and the small panel (app/panel: the editor's side
     // bar, the menu bar); our headers go on before it starts the response
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -3304,7 +3492,6 @@ const server = http.createServer((req, res) => {
   }
   res.writeHead(404).end();
 });
-
 // Next.js renders the page and bundles the office's code: `--dev` runs it with Turbopack and hot reload, otherwise it
 // serves the production build made by `npm run build`.
 const DEV = process.argv.includes('--dev');
@@ -3579,6 +3766,7 @@ function stopTunnel() {
 process.on('exit', () => { try { awakeProc?.kill(); } catch { /* gone */ } otel.saveSync(); });
 for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => process.exit(0));
 
+startOpenBot({ sessions, sidToKey, newSession, broadcast, pub, pushFeed, takeId: () => ++seq, floor: path.join(HOME, 'OpenBot') });
 server.listen(PORT, HOST, () => {
   syncLan();
   if (prefs.get('tunnel')) startTunnel(); else killStaleTunnel();

@@ -346,6 +346,7 @@ function renderAdd() {
 }
 export function renderLimits() {
   const ws = liveWindows(), box = $('plan-card'), others = state.limits?.others || [], none = !ws.length && !others.length;
+  if (!box) return;   // Claude plan şeridi kaldırıldı: plan kartı artık DOM'da yok
   box.classList.toggle('is-empty', none);
   { // the pill shows the tightest limit (5 hours, the week, a model's week), coloured by how close it is
     const pill = $('btn-plan'), top = tightest(ws);

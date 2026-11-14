@@ -29,7 +29,7 @@ export default async function SettingsPanel() {
         <button type="button" className="st-close" id="st-close" aria-label={t('common.close')}><span data-icon="x"></span></button>
       </div>
       <div className="st-tabs" role="tablist">
-        {(['office', 'people', 'display', 'more'] as const).map((k, i) => (
+        {(['office', 'people', 'display', 'more', 'openbot'] as const).map((k, i) => (
           <button key={k} type="button" role="tab" id={`st-tab-${k}`} aria-controls={`st-panel-${k}`} aria-selected={i === 0 ? 'true' : 'false'} data-st-tab={k}>{t(`settings.tabs.${k}`)}</button>
         ))}
       </div>
@@ -172,6 +172,43 @@ export default async function SettingsPanel() {
             <p className="pop-note">{t('settings.cache.note')}</p>
             <div className="pop-toggles"><button type="button" className="tgl" data-cache-nudge="" role="switch" aria-checked="false"><span>{t('settings.cache.nudge')}</span><i></i></button></div>
           </div>
+        </section>
+
+        <section className="st-panel" id="st-panel-openbot" role="tabpanel" aria-labelledby="st-tab-openbot" data-st-panel="openbot" hidden>
+          <h3>{t('settings.openbot.title')}</h3>
+          <p className="pop-note">{t('settings.openbot.note')}</p>
+          <div className="st-form-grid">
+            <label>{t('settings.openbot.theme')}
+              <select data-ob-setting="theme" defaultValue="midnight">
+                <option value="midnight">Midnight</option><option value="graphite">Graphite</option><option value="aurora">Aurora</option>
+              </select>
+            </label>
+            <label>{t('settings.openbot.density')}
+              <select data-ob-setting="density" defaultValue="comfortable">
+                <option value="comfortable">{t('settings.openbot.comfortable')}</option><option value="compact">{t('settings.openbot.compact')}</option><option value="focus">{t('settings.openbot.focus')}</option>
+              </select>
+            </label>
+            <label>{t('settings.openbot.refresh')}
+              <select data-ob-setting="refreshSeconds" defaultValue="45">
+                {[15, 30, 45, 60].map((n) => <option value={n} key={n}>{t('settings.openbot.seconds', { n })}</option>)}
+              </select>
+            </label>
+            <label>{t('settings.openbot.nightMode')}
+              <select data-ob-setting="nightMode" defaultValue="auto">
+                <option value="auto">{t('settings.openbot.auto')}</option><option value="day">{t('settings.times.day.name')}</option><option value="night">{t('settings.times.night.name')}</option>
+              </select>
+            </label>
+          </div>
+          <div className="pop-toggles ob-main-toggles">
+            {(['showBoard', 'showPerformance', 'showWaits', 'desktopNotifications'] as const).map((key) => (
+              <button key={key} type="button" className="tgl" data-ob-setting={key} data-ob-type="boolean" role="switch" aria-checked="true"><span>{t(`settings.openbot.${key}`)}</span><i></i></button>
+            ))}
+          </div>
+          <div className="pop-acts ob-main-links">
+            <a className="tb-btn" href="/openbot">{t('settings.openbot.openCenter')}</a>
+            <a className="tb-btn" href="/openbot?tab=commands">{t('settings.openbot.directCommand')}</a>
+          </div>
+          <p className="pop-note" id="ob-settings-status" aria-live="polite"></p>
         </section>
       </div>
     </div>

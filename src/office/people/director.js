@@ -59,6 +59,18 @@ export function setup() {
       this.attachPaper();
     }
     attachPaper() { this.paper = new THREE.Mesh(paperGeo, paperDocM); this.paper.position.set(0, -0.06, 0.07); this.paper.rotation.x = 0.3; this.paper.visible = !!this.job; this.P.armR.hand.add(this.paper); }
+    // The OpenBot director is this person, not a second body at a desk.
+    bind(s) {
+      if (!s) return;
+      this.agent = s.id;
+      this.setName(short(s.name || tr('people.director'), 26));
+      if (this.job || this.phase === 'walk') return;
+      if (this._st === s.status && this._task === s.lastPrompt) return;
+      this._st = s.status; this._task = s.lastPrompt || '';
+      if (s.status === 'work') { this.anim = 'type'; if (s.lastPrompt) this.say('edit', short(s.lastPrompt, 42)); }
+      else if (s.status === 'wait') { this.anim = 'hand'; this.say('wait', short(s.lastPrompt || tr('people.needsApproval'), 42), 'wait'); }
+      else if (this.station === 'home') { this.anim = 'read'; this.hush(); }
+    }
     rebuild() { super.rebuild(); this.attachPaper(); }
     deliver(sess, text) {
       const q = this.queue.find((j) => j.sess === sess);
@@ -106,7 +118,7 @@ export function setup() {
       }
       if (!j && this.queue.length && state.sim >= (this.holdUntil || 0)) { this.start(this.queue.shift()); return; }
       if (!j && this.station !== 'home' && this.station !== 'going-home') { this.goHome(); return; }
-      if (this.station === 'home' && state.sim > this.nextIdle) {   // at the desk: works, reads a report, thinks
+      if (this.station === 'home' && state.sim > this.nextIdle && !this.agent) {   // at the desk: works, reads a report, thinks
         const busy = [...sessions.values()].some((s) => s.status === 'work');
         this.anim = busy ? (Math.random() < 0.65 ? 'type' : 'think') : (Math.random() < 0.5 ? 'read' : 'type');
         this.nextIdle = state.sim + rand(6, 11);

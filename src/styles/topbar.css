@@ -1,6 +1,8 @@
 /* Top bar. */
 /* top bar */
 .topbar { grid-area: top; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 16px; background: var(--bar); border-bottom: 1px solid var(--line); z-index: 3; }
+.tb-ops-link { color: #c7f9dc; border-color: #327457; background: linear-gradient(135deg, #163b32, #10261f); box-shadow: 0 0 0 1px #32745733, 0 0 16px #3274571f; }
+.tb-ops-link:hover { color: #fff; border-color: #70e0a0; background: linear-gradient(135deg, #235b49, #17382d); }
 .tb-brand { display: flex; align-items: center; gap: 10px; font-size: 1.12rem; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; }
 .logo { width: 28px; height: 28px; display: grid; place-items: center; color: #F08A3E; }
 .logo svg { width: 28px; height: 28px; }

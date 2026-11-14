@@ -15,6 +15,14 @@ import { t as tr } from '../../../i18n/index.js';
 
 /** DEPT_SIGNS[i](name) redraws room i's door plaque: the project's name, or '' for a free room. */
 export const DEPT_SIGNS = [];
+/** Sabit oda isimleri, dept sırasına göre: 0 Çalışma, 1 Yönetim, 2 Mesaj, 3 Kod. */
+export const ROOM_NAMES = ['Çalışma', 'Yönetim', 'Mesaj', 'Kod'];
+export const ROOM_PURPOSE = {
+  Çalışma: 'Araştırma, tasarım ve prototip',
+  Yönetim: 'Director, dağıtım, onay ve lonca',
+  Mesaj: 'Telegram, WhatsApp ve destek',
+  Kod: 'Kod, test ve hata ayıklama',
+};
 const ACCENTS = ['#3F7CC4', '#6A8042', '#D97757', '#8C4FA8'];
 const CARPETS = ['#5E6B7D', '#66735C', '#7B6A5E', '#655F7A'];
 const FONT = '"Be Vietnam Pro", system-ui, sans-serif';
@@ -28,8 +36,11 @@ function plaque(i, x, y, z, ry) {
     g.fillStyle = '#1E232B'; g.fillRect(0, 0, 512, 160); g.fillStyle = ACCENTS[i]; g.fillRect(0, 0, 14, 160);
     g.textAlign = 'center'; g.textBaseline = 'middle';
     g.fillStyle = name ? '#F3EFE8' : '#9AA3B0'; g.font = `800 ${name ? 56 : 46}px ${FONT}`;
-    const title = name ? tr('world.dept.name', { name }) : tr('world.dept.free', { n }); fitText(g, title, 456); g.fillText(title, 263, 66);
-    g.fillStyle = '#A9B2C0'; g.font = `600 26px ${FONT}`; g.fillText(name ? tr('world.dept.sub', { n }) : tr('world.dept.freeSub'), 263, 122);
+    const room = ROOM_NAMES[i] || `Oda ${n}`;
+    g.fillStyle = '#F3EFE8'; g.font = `800 52px ${FONT}`;
+    fitText(g, room, 456); g.fillText(room, 263, 66);
+    g.fillStyle = '#A9B2C0'; g.font = `600 26px ${FONT}`;
+    g.fillText(ROOM_PURPOSE[room] || tr('world.dept.sub', { n }), 263, 122);
     tex.needsUpdate = true;
   };
   draw('');

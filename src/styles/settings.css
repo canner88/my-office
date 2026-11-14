@@ -16,6 +16,13 @@
 .st-panel h3 { margin: 12px 2px 0; }
 .st-group { display: grid; gap: 8px; }
 .st-group:not(:has(.tb-btn:not([hidden]))) { display: none; }   /* no phone or alert button on this device */
+.st-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.st-form-grid label { display: grid; gap: 5px; color: var(--muted); font-size: .74rem; font-weight: 600; }
+.st-form-grid select { width: 100%; box-sizing: border-box; padding: 8px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); font: inherit; }
+.st-form-grid select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ob-main-toggles { gap: 6px; }
+.ob-main-links { display: flex; flex-wrap: wrap; gap: 6px; }
+.ob-main-links .tb-btn { text-decoration: none; }
 
 .st-cards { display: grid; gap: 8px; }
 .st-cards--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -75,4 +82,5 @@
 @media (max-width: 720px) {
   .pop-settings { top: 58px; left: 10px; right: 10px; width: auto; }
   .st-cards--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .st-form-grid { grid-template-columns: 1fr; }
 }
