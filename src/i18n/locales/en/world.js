@@ -47,6 +47,10 @@ export default {
     hqSub: 'Departments',
     board: 'Sprint board',
     cols: ['To do', 'Doing', 'Done'],
+    agents: 'Agents in this room',
+    clickNote: 'Open the OpenBot control center for tasks in this area.',
+    noAgents: 'No agents assigned to this room.',
+    loadError: 'Failed to load agents.',
   },
   // the traffic police on the street (street-csgt.js): what they say, the card, the record (biên bản)
   csgt: {

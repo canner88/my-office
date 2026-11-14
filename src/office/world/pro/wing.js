@@ -45,7 +45,11 @@ function plaque(i, x, y, z, ry) {
   };
   draw('');
   const m = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.28), new THREE.MeshBasicMaterial({ map: tex, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
-  m.position.set(x, y, z); m.rotation.y = ry; m.userData.noMerge = true; scene.add(m);
+  m.position.set(x, y, z); m.rotation.y = ry; m.userData.noMerge = true;
+  m.userData.room = ROOM_NAMES[i] || `Oda ${n}`;
+  m.userData.roomIndex = i;
+  m.userData.roomPurpose = ROOM_PURPOSE[room] || '';
+  scene.add(m);
   let shown = '';
   DEPT_SIGNS[i] = (name) => { if (name === shown) return; shown = name; draw(name); };
 }

@@ -88,6 +88,16 @@ const tr = {
     },
   },
   topbar: { ...en.topbar },
+  world: {
+    ...en.world,
+    dept: {
+      ...en.world.dept,
+      agents: 'Bu odadaki ajanlar',
+      clickNote: 'Bu bölgedeki görevler için OpenBot kontrol merkezini açın.',
+      noAgents: 'Bu odada atanmış ajan yok.',
+      loadError: 'Ajanlar yüklenemedi.',
+    },
+  },
 };
 
 export default tr;

@@ -145,6 +145,23 @@ const FEED_MAX = 80;
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
+// Sürükle-bırak görev panosu: görev sütun değişikliklerinin kalıcı kaydı
+const BOARD_MOVES_FILE = path.join(DATA_DIR, 'openbot-board-moves.json');
+let boardMoves = {}; try { boardMoves = JSON.parse(fs.readFileSync(BOARD_MOVES_FILE, 'utf8')) || {}; } catch { /* none yet */ }
+const saveBoardMoves = async () => { await fsp.writeFile(BOARD_MOVES_FILE, JSON.stringify(boardMoves, null, 2)); };
+const applyBoardMoves = (board) => {
+  const next = { todo: [], doing: [], done: [], blocked: [] };
+  const cols = ['todo', 'doing', 'done', 'blocked'];
+  for (const col of cols) {
+    for (const task of (board[col] || [])) {
+      const target = boardMoves[task.id] || col;
+      if (cols.includes(target)) next[target].push({ ...task, status: target });
+      else next[col].push(task);
+    }
+  }
+  return next;
+};
+
 // Phones on the LAN need this token in the URL; requests from the Mac itself don't.
 const TOKEN_FILE = path.join(DATA_DIR, 'token');
 const TOKEN = fs.existsSync(TOKEN_FILE)
@@ -3342,6 +3359,24 @@ const server = http.createServer((req, res) => {
     }).catch(() => json(res, 400, { ok: false, message: tr('server.badRequest') }));
     return;
   }
+  if (url.pathname === '/api/openbot/task/move' && req.method === 'POST') {
+    const sameOrigin = sameOriginOf(req);
+    if (!authorized(req, url) || !sameOrigin || !String(req.headers['content-type'] || '').startsWith('application/json')) {
+      json(res, 403, { ok: false, message: tr('server.forbidden') }); return;
+    }
+    readJson(req, 6_000).then(async (body) => {
+      try {
+        const taskId = String(body?.taskId || '').trim();
+        const column = String(body?.column || '').trim();
+        if (!taskId || !['todo', 'doing', 'done', 'blocked'].includes(column)) throw new Error('Görev ID ve sütun zorunludur.');
+        boardMoves[taskId] = column;
+        await saveBoardMoves();
+        fsp.appendFile(ACTION_LOG, `${new Date().toISOString()} openbot board move ${taskId} -> ${column}\n`).catch(() => {});
+        json(res, 200, { ok: true, taskId, column });
+      } catch (err) { json(res, 400, { ok: false, message: String(err.message || err) }); }
+    }).catch(() => json(res, 400, { ok: false, message: tr('server.badRequest') }));
+    return;
+  }
   if (url.pathname === '/api/openbot/notifications/test' && req.method === 'POST') {
     const sameOrigin = sameOriginOf(req);
     if (!authorized(req, url) || !sameOrigin) { json(res, 403, { ok: false, message: tr('server.forbidden') }); return; }
@@ -3367,8 +3402,19 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/api/cache') { json(res, 200, { ok: true, nudge: !!prefs.get('cacheNudge') }); return; }
   if (url.pathname === '/api/tasks') { json(res, 200, tasksOut(isLoopback(req))); return; }
   if (url.pathname === '/api/openbot/overview') {
-    try { json(res, 200, readOpenBotOverview()); }
+    try {
+      const overview = readOpenBotOverview();
+      overview.board = applyBoardMoves(overview.board);
+      json(res, 200, overview);
+    }
     catch (err) { console.error('OpenBot overview:', err.message); json(res, 503, { ok: false, message: 'OpenBot data is unavailable' }); }
+    return;
+  }
+  if (url.pathname === '/api/openbot/messaging-connections' && req.method === 'GET') {
+    const sameOrigin = sameOriginOf(req);
+    if (!authorized(req, url) || !sameOrigin) { json(res, 403, { ok: false, message: tr('server.forbidden') }); return; }
+    try { json(res, 200, { ok: true, connections: readOpenBotMessagingConnections() }); }
+    catch (err) { console.error('OpenBot messaging connections:', err.message); json(res, 503, { ok: false, message: 'Messaging connections are unavailable' }); }
     return;
   }
   if (url.pathname === '/api/openbot/orchestration') {

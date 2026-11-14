@@ -96,6 +96,7 @@ import * as uiTopbar from './ui/topbar.js';
 import * as interactProps from './interact/props.js';
 import * as interactPlaceChips from './interact/place-chips.js';
 import * as interactPlaceCards from './interact/place-cards.js';
+import * as interactRoomClick from './interact/room-click.js';
 import * as uiWhiteboard from './ui/whiteboard.js';
 import * as uiLookSwitch from './ui/look-switch.js';
 import * as uiSettings from './ui/settings.js';
@@ -218,6 +219,7 @@ const MODULES = [
   interactProps,
   interactPlaceChips,
   interactPlaceCards,
+  interactRoomClick,
   uiWhiteboard,
   uiLookSwitch,
   uiSettings,

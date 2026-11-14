@@ -12,6 +12,8 @@ type NotificationsConfig = {
   webhookUrl: string;
   telegramBotToken: string;
   telegramChatId: string;
+  whatsappOrchestrator: boolean;
+  telegramOrchestrator: boolean;
   events: { taskCompleted: boolean; taskFailed: boolean; selfHealing: boolean; approvalNeeded: boolean };
 };
 type Settings = {
@@ -106,6 +108,8 @@ const permissionKeys = [['read', 'Okuma'], ['write', 'Yazma'], ['execute', 'Komu
 const duration = (value: number | null) => value == null ? '—' : value < 60 ? `${value} sn` : `${Math.round(value / 60)} dk`;
 const stageStatusLabel = (status: string) => status === 'completed' ? 'Tamamlandı' : status === 'working' ? 'Çalışıyor' : status === 'queued' ? 'Bekliyor' : status === 'blocked' ? 'Bloklu' : status;
 
+const escapeHtml = (text: string) => { const d = document.createElement('div'); d.textContent = text; return d.innerHTML; };
+
 const postSettings = async (body: object) => {
   const response = await fetch('/api/openbot/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const result = await response.json();
@@ -126,6 +130,7 @@ export default function OpenBotDashboard() {
   const [error, setError] = useState('');
   const [saved, setSaved] = useState('');
   const [commandResult, setCommandResult] = useState('');
+  const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -356,11 +361,49 @@ export default function OpenBotDashboard() {
               <h2>Görev panosu</h2>
               <div className="ob-board">
                 {columns.map(([key, title]) => (
-                  <article className="ob-column" key={key}>
+                  <article className={`ob-column ${dragOverColumn === key ? 'drag-over' : ''}`} key={key} data-column={key}
+                    onDragEnter={(e) => { e.preventDefault(); if (e.dataTransfer.getData('taskId')) setDragOverColumn(key); }}
+                    onDragOver={(e) => { e.preventDefault(); }}
+                    onDragLeave={() => setDragOverColumn(null)}
+                    onDrop={async (e) => {
+                      e.preventDefault();
+                      setDragOverColumn(null);
+                      const taskId = e.dataTransfer.getData('taskId');
+                      const fromColumn = e.dataTransfer.getData('fromColumn');
+                      const toColumn = key;
+                      if (!taskId || fromColumn === toColumn) return;
+                      try {
+                        const res = await fetch('/api/openbot/task/move', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ taskId, column: toColumn })
+                        });
+                        const result = await res.json();
+                        if (!res.ok || !result.ok) throw new Error(result.message || 'Taşıma kaydedilemedi.');
+                        await load();
+                      } catch (cause) {
+                        setError(cause instanceof Error ? cause.message : 'Görev taşınamadı.');
+                      }
+                    }}
+                  >
                     <h3>{title}<span>{data.board[key].length}</span></h3>
                     {data.board[key].length === 0 && <p className="ob-empty">Kayıt yok</p>}
                     {data.board[key].map((task) => (
-                      <div className="ob-task" key={task.id}>
+                      <div
+                        className="ob-task"
+                        key={task.id}
+                        draggable
+                        data-task-id={task.id}
+                        data-from-column={key}
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('taskId', task.id);
+                          e.dataTransfer.setData('fromColumn', key);
+                          e.currentTarget.classList.add('ob-dragging');
+                        }}
+                        onDragEnd={(e) => {
+                          e.currentTarget.classList.remove('ob-dragging');
+                        }}
+                      >
                         <b>{task.title || 'Başlıksız görev'}</b>
                         <small>{task.agent} · {new Date(task.updatedAt).toLocaleString()}</small>
                         {task.error && <small className="ob-error">{task.error}</small>}
@@ -858,10 +901,25 @@ function OfficeSettings({ settings, onSave }: { settings: Settings['office']; on
     webhookUrl: '',
     telegramBotToken: '',
     telegramChatId: '',
+    whatsappOrchestrator: true,
+    telegramOrchestrator: true,
     events: { taskCompleted: true, taskFailed: true, selfHealing: true, approvalNeeded: true }
   };
   const [notifState, setNotifState] = useState<NotificationsConfig>(notif);
   const [testResult, setTestResult] = useState<string>('');
+  const [connections, setConnections] = useState<Array<{ id: string; platform: string; workspaceName: string; enabled: boolean; orchestratorAgentId: string | null }>>([]);
+  const [connectionsLoaded, setConnectionsLoaded] = useState(false);
+
+  const loadConnections = async () => {
+    try {
+      const res = await fetch('/api/openbot/messaging-connections', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        setConnections(data.connections || []);
+      }
+    } catch { /* connections optional */ }
+    finally { setConnectionsLoaded(true); }
+  };
 
   const sendTestNotification = async () => {
     try {
@@ -882,16 +940,38 @@ function OfficeSettings({ settings, onSave }: { settings: Settings['office']; on
     }
   };
 
+  const testChannel = async (platform: string) => {
+    try {
+      const res = await fetch('/api/openbot/notifications/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config: notifState, channel: platform })
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setTestResult(`✓ ${platform} testi başarılı: ${JSON.stringify(data.results)}`);
+      } else {
+        setTestResult(`✗ ${platform} testi başarısız: ${JSON.stringify(data.results || data.message)}`);
+      }
+    } catch (e) {
+      setTestResult(`✗ ${platform} bağlantı hatası: ${e instanceof Error ? e.message : 'Bilinmeyen hata'}`);
+    }
+  };
+
   const updateNotif = (patch: Partial<NotificationsConfig>) => {
     const next = { ...notifState, ...patch };
     setNotifState(next);
     onSave({ notifications: next });
   };
 
+  useEffect(() => {
+    loadConnections();
+  }, []);
+
   return (
     <section className="ob-section ob-settings">
       <h2>Ofis ayarları</h2>
-      <p className="ob-note">Panel görünümü, yenileme ve harici bildirim (Webhook / Telegram) entegrasyonu.</p>
+      <p className="ob-note">Panel görünümü, yenileme ve harici bildirim (Webhook / Telegram / WhatsApp) entegrasyonu.</p>
       <div className="ob-form-grid">
         <label>
           Yenileme aralığı (sn)
@@ -958,6 +1038,55 @@ function OfficeSettings({ settings, onSave }: { settings: Settings['office']; on
         <button className="ob-secondary" onClick={sendTestNotification}>🧪 Test Bildirimi Gönder</button>
         {testResult && <span style={{ marginLeft: '12px', fontSize: '.9rem', color: testResult.startsWith('✓') ? '#8fe0b4' : '#ff9e9e' }}>{testResult}</span>}
       </div>
+
+      {/* Feature 3: Telegram & WhatsApp connections */}
+      <hr style={{ borderColor: '#293545', margin: '24px 0' }} />
+      <h3>📱 Telegram & WhatsApp Bağlantıları</h3>
+      <p className="ob-note">Director bildirimlerini bağlı Telegram ve WhatsApp kanallarına iletir. Bağlantılar OpenBot otomasyonu üzerinden yapılandırılır.</p>
+      <div className="ob-check-grid">
+        <label>
+          <input type="checkbox" checked={notifState.whatsappOrchestrator !== false} onChange={(e) => updateNotif({ whatsappOrchestrator: e.target.checked })} /> <strong>WhatsApp Orchesterası</strong>
+        </label>
+        <label>
+          <input type="checkbox" checked={notifState.telegramOrchestrator !== false} onChange={(e) => updateNotif({ telegramOrchestrator: e.target.checked })} /> <strong>Telegram Orchesterası</strong>
+        </label>
+      </div>
+      <div className="ob-form-grid">
+        <label>
+          Doğrudan Telegram Bot Token
+          <input value={notifState.telegramBotToken} onChange={(e) => updateNotif({ telegramBotToken: e.target.value })} placeholder="123456:ABC-DEF..." />
+        </label>
+        <label>
+          Doğrudan Telegram Chat ID
+          <input value={notifState.telegramChatId} onChange={(e) => updateNotif({ telegramChatId: e.target.value })} placeholder="-100123456789 veya 987654321" />
+        </label>
+      </div>
+      <div className="ob-modal-actions" style={{ justifyContent: 'flex-start', alignItems: 'center', gap: 10 }}>
+        {connectionsLoaded && (
+          <>
+            <button className="ob-secondary" onClick={() => testChannel('whatsapp')}>📱 WhatsApp Testi</button>
+            <button className="ob-secondary" onClick={() => testChannel('telegram')}>✈️ Telegram Testi</button>
+            <button className="ob-secondary" onClick={sendTestNotification}>🧪 Tüm Kanallara Test</button>
+          </>
+        )}
+        {!connectionsLoaded && <span style={{ fontSize: '0.85rem', color: '#9eacbb' }}>Bağlantılar yükleniyor…</span>}
+      </div>
+      {connections.length > 0 && (
+        <div className="ob-section" style={{ marginTop: '16px', padding: '14px', border: '1px solid #293545', borderRadius: '9px', background: '#101722' }}>
+          <h4 style={{ margin: '0 0 10px', fontSize: '0.9rem', color: '#8ecbff' }}>Etkin Bağlantılar</h4>
+          {connections.map((c) => (
+            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', borderBottom: '1px solid #223246' }}>
+              <span style={{ color: c.platform === 'whatsapp' ? '#25d366' : '#1c9cd2', fontWeight: '600' }}>{c.platform === 'whatsapp' ? '📱 WhatsApp' : '✈️ Telegram'}</span>
+              <span style={{ flex: 1, color: '#c7d2df', fontSize: '0.88rem' }}>{escapeHtml(c.workspaceName)}</span>
+              <span style={{ color: c.enabled ? '#6ce0a0' : '#ff9e9e', fontSize: '0.8rem' }}>{c.enabled ? 'Aktif' : 'Pasif'}</span>
+              {c.orchestratorAgentId ? <span style={{ color: '#9eacbb', fontSize: '0.75rem', marginLeft: 'auto' }}>Director: {c.orchestratorAgentId.slice(0, 8)}…</span> : null}
+            </div>
+          ))}
+        </div>
+      )}
+      {connectionsLoaded && connections.length === 0 && (
+        <p style={{ marginTop: '10px', fontSize: '0.85rem', color: '#9eacbb' }}>Henüz Telegram veya WhatsApp bağlantısı yok. OpenBot otomasyonundan bir kanal bağlayın.</p>
+      )}
     </section>
   );
 }

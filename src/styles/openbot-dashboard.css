@@ -200,3 +200,16 @@
 @media (max-width: 900px) { .ob-capability-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 680px) { .ob-ops-grid { grid-template-columns: 1fr; } .ob-capability-grid { grid-template-columns: 1fr; } }
 
+/* Drag-drop görev panosu */
+.ob-column[data-column] { min-height: 260px; display: grid; gap: 8px; }
+.ob-column[data-column]::after { content: ''; min-height: 40px; }
+.ob-task[draggable] { cursor: grab; touch-action: none; }
+.ob-task[draggable]:active { cursor: grabbing; }
+.ob-task.ob-dragging { opacity: 0.5; border-style: dashed; border-color: #8ecbff; background: #1a2533; }
+.ob-column.drag-over { border: 2px dashed #72b7ff; background: #1a2a40; border-radius: 9px; }
+.ob-column.drag-over .ob-empty { opacity: 0; }
+
+/* 3D ofis oda paneli (room-click) */
+.ob-room-card { animation: obRoomFade 0.2s ease-out; }
+@keyframes obRoomFade { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+
